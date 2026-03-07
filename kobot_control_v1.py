@@ -14,7 +14,7 @@ class KobotControlV1(Node):
         self.declare_parameter('wheel_base', 0.5)      # Distance between wheels (meters)
         self.declare_parameter('wheel_diameter', 0.04) # 4cm diameter (meters)
         self.declare_parameter('ppr', 600.0)           # Pulses per revolution
-        self.declare_parameter('serial_port', '/dev/ttyACM0')
+        self.declare_parameter('serial_port', '/dev/ttyAMA0')
 
         self.L = self.get_parameter('wheel_base').value
         self.D = self.get_parameter('wheel_diameter').value
