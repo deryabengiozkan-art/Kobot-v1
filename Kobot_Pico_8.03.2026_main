@@ -1,0 +1,72 @@
+import utime
+from machine import Pin
+import _thread
+
+# LED Ayarı
+led = Pin("LED", Pin.OUT) if "LED" in dir(Pin) else Pin(25, Pin.OUT)
+led.on()
+
+# DONANIM KURULUMU
+try:
+    from kobot_lib import CommsBin, TwoWheel, Encoder, PID, Battery
+    robot = TwoWheel(motor1_pins=(6, 7), motor2_pins=(20, 19))
+    enc_left  = Encoder(Pin(2,  Pin.IN), Pin(3,  Pin.IN))
+    enc_right = Encoder(Pin(10, Pin.IN), Pin(11, Pin.IN))
+    battery = Battery(battery_pin=26)
+    comms = CommsBin(uart_id=1, tx_pin=4, rx_pin=5)
+    
+    pid_l = PID(kp=100, ki=250, kd=0.01, output_limits=(0, 65535))
+    pid_r = PID(kp=100, ki=250, kd=0.01, output_limits=(0, 65535))
+except Exception as e:
+    # Hata olursa LED hızlı yanıp söner
+    while True:
+        led.toggle(); utime.sleep_ms(100)
+
+# PID DÖNGÜSÜ (CORE 1) - Dokunmuyoruz, gayet iyi.
+def control_loop():
+    while True:
+        tl, tr = comms.target_v_l, comms.target_v_r
+        if abs(tl) < 0.05 and abs(tr) < 0.05:
+            robot.motor1_write(0, True); robot.motor2_write(0, True)
+            pid_l.reset(); pid_r.reset()
+        else:
+            cl, cr = enc_left.velocity(), enc_right.velocity()
+            pid_l.setpoint, pid_r.setpoint = abs(tl), abs(tr)
+            pwml, pwmr = pid_l.update(abs(cl)), pid_r.update(abs(cr))
+            robot.motor1_write(int(pwml), not (tl > 0)) 
+            robot.motor2_write(int(pwmr), tr > 0)
+        utime.sleep_ms(10)
+
+# ANA DÖNGÜ (CORE 0) - HABERLEŞME ÖNCELİKLİ
+_thread.start_new_thread(control_loop, ())
+
+last_telemetry = utime.ticks_ms()
+
+while True:
+    try:
+        # 1. ÖNCELİK: Komutları durmadan al
+        comms.receive_commands()
+        comms.check_failsafe(2000) # Failsafe'i 2 saniyeye çıkardık (Güvenli bölge)
+        
+        simdi = utime.ticks_ms()
+
+        # 2. ÖNCELİK: Telemetriyi daha seyrek gönder (100ms = 10Hz)
+        if utime.ticks_diff(simdi, last_telemetry) >= 100:
+            # Encoder verilerini oku
+            v_l = enc_left.velocity()
+            v_r = enc_right.velocity()
+            v_b = battery.get_voltage()
+            
+            # Veriyi Pi'ye bas
+            comms.send_telemetry(v_l, v_r, v_b)
+            last_telemetry = simdi
+            
+            # Çalıştığını anlamak için LED'i hafifçe göz kırptır
+            led.toggle()
+
+    except:
+        # Hata anında bile döngüden çıkma, devam et
+        pass
+    
+    # İşlemciyi boğmamak için çok kısa bekleme
+    utime.sleep_ms(1)
